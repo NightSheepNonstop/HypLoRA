@@ -50,7 +50,7 @@ port=$(shuf -i25000-30000 -n1)
    --evaluation_strategy no \
    --save_strategy no \
    --save_steps 1500 \
-   --lamda_1 0.5 \
+   --lamda_1 0 \
    --lamda_2 0
 
 sleep 5
@@ -85,7 +85,7 @@ sleep 5
    --evaluation_strategy no \
    --save_strategy no \
    --save_steps 1500 \
-   --lamda_1 0.5 \
+   --lamda_1 0\
    --lamda_2 0
 
 sleep 5
@@ -120,7 +120,7 @@ sleep 5
    --evaluation_strategy no \
    --save_strategy no \
    --save_steps 1500 \
-   --lamda_1 0.5 \
+   --lamda_1 0 \
    --lamda_2 0
 
 sleep 5
@@ -155,5 +155,5 @@ sleep 5
    --evaluation_strategy no \
    --save_strategy no \
    --save_steps 1500 \
-   --lamda_1 0.5 \
+   --lamda_1 0 \
    --lamda_2 0

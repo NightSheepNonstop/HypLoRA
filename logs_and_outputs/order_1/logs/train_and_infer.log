@@ -6,21 +6,16 @@
 + TRANSFORMERS_CACHE=/home/yangye/.cache/huggingface
 + mkdir -p /home/yangye/.cache/huggingface
 ++ shuf -i25000-30000 -n1
-+ port=25855
-+ CUDA_VISIBLE_DEVICES=0,1
-+ deepspeed --master_port 25855 src/run_uie_lora.py --do_train --do_predict --predict_with_generate --model_name_or_path /workspace/data/MLLMs/yangye/initial_model/t5-large --data_dir CL_Benchmark --task_config_dir configs/order1_configs/dbpedia --instruction_file configs/instruction_config.json --instruction_strategy single --output_dir logs_and_outputs/order_1/outputs/1-dbpedia --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 1 --learning_rate 1e-03 --num_train_epochs 1 --deepspeed configs/ds_configs/stage2.config --run_name order1_round1 --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --evaluation_strategy no --save_strategy no --save_steps 1500 --lamda_1 0.5 --lamda_2 0
-[2026-02-02 17:37:56,840] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
++ port=27043
++ python src/run_uie_lora.py --do_train --do_predict --predict_with_generate --model_name_or_path /workspace/data/MLLMs/yangye/initial_model/t5-large --data_dir CL_Benchmark --task_config_dir configs/order1_configs/dbpedia --instruction_file configs/instruction_config.json --instruction_strategy single --output_dir logs_and_outputs/order_1/outputs/1-dbpedia --per_device_train_batch_size 8 --per_device_eval_batch_size 128 --gradient_accumulation_steps 1 --learning_rate 1e-03 --num_train_epochs 1 --run_name order1_round1 --max_source_length 512 --max_target_length 50 --generation_max_length 50 --add_task_name True --add_dataset_name True --overwrite_output_dir --overwrite_cache --lr_scheduler_type constant --warmup_steps 0 --logging_strategy steps --logging_steps 10 --evaluation_strategy no --save_strategy no --save_steps 1500 --lamda_1 0.5 --lamda_2 0
+[2026-02-02 17:55:02,610] [INFO] [real_accelerator.py:133:get_accelerator] Setting ds_accelerator to cuda (auto detect)
 /workspace/envs/MLLMs/yangye/conda_envs/lora/lib/python3.11/site-packages/deepspeed/runtime/zero/linear.py:47: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
   @autocast_custom_fwd
 /workspace/envs/MLLMs/yangye/conda_envs/lora/lib/python3.11/site-packages/deepspeed/runtime/zero/linear.py:66: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
   @autocast_custom_bwd
 /workspace/envs/MLLMs/yangye/conda_envs/lora/lib/python3.11/site-packages/accelerate/utils/torch_xla.py:18: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
   import pkg_resources
-[2026-02-02 17:37:57,774] [WARNING] [runner.py:196:fetch_hostfile] Unable to find hostfile, will proceed with training with local resources only.
-Detected CUDA_VISIBLE_DEVICES=0,1: setting --include=localhost:0,1
-Traceback (most recent call last):
-  File "/workspace/envs/MLLMs/yangye/conda_envs/lora/bin/deepspeed", line 6, in <module>
-    main()
-  File "/workspace/envs/MLLMs/yangye/conda_envs/lora/lib/python3.11/site-packages/deepspeed/launcher/runner.py", line 412, in main
-    raise RuntimeError("Unable to proceed, no GPU resources available")
-RuntimeError: Unable to proceed, no GPU resources available
+/workspace/envs/MLLMs/yangye/conda_envs/lora/lib/python3.11/site-packages/fairscale/experimental/nn/offload.py:19: FutureWarning: `torch.cuda.amp.custom_fwd(args...)` is deprecated. Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.
+  return torch.cuda.amp.custom_fwd(orig_func)  # type: ignore
+/workspace/envs/MLLMs/yangye/conda_envs/lora/lib/python3.11/site-packages/fairscale/experimental/nn/offload.py:30: FutureWarning: `torch.cuda.amp.custom_bwd(args...)` is deprecated. Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.
+  return torch.cuda.amp.custom_bwd(orig_func)  # type: ignore
