@@ -1,5 +1,15 @@
 #!/bin/bash
+# 日志重定向
+cd "$HOME/O-LoRA" || { echo "进入仓库目录失败" >&2; exit 1; }
+LOG_DIR="logs_and_outputs/order_1/logs"
+mkdir -p "$LOG_DIR"
+exec >"$LOG_DIR/train_and_infer.log" 2>&1
+
+export PATH="/workspace/envs/MLLMs/$USER/conda_envs/lora/bin:$PATH"
+
+set -euo pipefail
 set -x
+
 
 export CUDA_DEVICE_ORDER="PCI_BUS_ID"
 export HF_HOME=$HOME/.cache/huggingface
@@ -14,7 +24,7 @@ CUDA_VISIBLE_DEVICES=0,1 deepspeed --master_port $port src/run_uie_lora.py \
    --do_train \
    --do_predict \
    --predict_with_generate \
-   --model_name_or_path /workspace/data/MLLMs/yangye/initial_model/t5-large \
+   --model_name_or_path /workspace/data/MLLMs/$USER/initial_model/t5-large \
    --data_dir CL_Benchmark \
    --task_config_dir configs/order1_configs/dbpedia \
    --instruction_file configs/instruction_config.json \
