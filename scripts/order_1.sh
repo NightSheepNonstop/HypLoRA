@@ -2,7 +2,7 @@
 set -x
 
 export CUDA_DEVICE_ORDER="PCI_BUS_ID"
-export HF_HOME=/home/yangye/.cache/huggingface
+export HF_HOME=$HOME/.cache/huggingface
 export TRANSFORMERS_CACHE="$HF_HOME"
 mkdir -p "$HF_HOME"
 
