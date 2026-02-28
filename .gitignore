@@ -1,0 +1,115 @@
+# O-LoRA / HypLoRA .gitignore
+# Aim: keep source/config/scripts; ignore training artifacts, caches, local env files.
+
+############################
+# OS / Editor
+############################
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+############################
+# Python
+############################
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual env
+.venv/
+venv/
+ENV/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+############################
+# Jupyter
+############################
+.ipynb_checkpoints/
+
+############################
+# Logs / outputs / runs
+############################
+logs/
+!logs/.gitkeep
+logs_and_outputs/
+logs_and_outputs_llama/
+outputs/
+results/
+runs/
+
+# TensorBoard
+**/events.out.tfevents.*
+
+# Weights & Biases
+wandb/
+
+############################
+# Checkpoints / model artifacts
+############################
+# Common HF/DeepSpeed checkpoints
+checkpoint*/
+**/checkpoint-*/
+
+# DeepSpeed runtime artifacts
+**/zero_to_fp32.py
+**/zero_to_fp32.json
+**/latest
+**/global_step*
+
+# Large binary model files
+*.bin
+*.pt
+*.pth
+*.safetensors
+*.ckpt
+
+# SentencePiece / tokenizer derived artifacts (keep the curated tokenizer under data/gpt2tokenizer)
+*.model
+
+############################
+# HuggingFace / Datasets cache (local)
+############################
+.cache/
+**/.cache/
+
+# HuggingFace default cache dirs
+huggingface/
+HF_HOME/
+
+############################
+# Data (keep scripts and canonical small tokenizer assets)
+############################
+# If you keep large datasets locally under data/, ignore everything except scripts and committed tokenizer files.
+/data/*
+!/data/generate_labels.py
+!/data/gpt2tokenizer/
+
+# NLTK downloaded data (often huge and machine-specific)
+/nltk_data/
+
+############################
+# Secrets
+############################
+.env
+.env.*
+*.key
+*.pem
+
+############################
+# Misc
+############################
+*.log
