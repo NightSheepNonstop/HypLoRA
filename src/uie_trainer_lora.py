@@ -78,14 +78,14 @@ class UIETrainer(Seq2SeqTrainer):
             return loss_mb.reduce_mean().detach().to(self.args.device)
 
         with self.compute_loss_context_manager():
-            loss = self.compute_loss(model, inputs)
+            base_loss = self.compute_loss(model, inputs)
 
         if self.args.n_gpu > 1:
-            loss = loss.mean()  # mean() to average on multi-gpu parallel training
+            base_loss = base_loss.mean()  # mean() to average on multi-gpu parallel training
 
         if self.args.gradient_accumulation_steps > 1 and not self.deepspeed:
             # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
-            loss = loss / self.args.gradient_accumulation_steps
+            base_loss = base_loss / self.args.gradient_accumulation_steps
 
         ########################### Regularization ##########################
         orthogonal_loss = 0.
@@ -93,8 +93,20 @@ class UIETrainer(Seq2SeqTrainer):
             if "lora_A" in name:
                 for name_, param_ in self.model.named_parameters():
                     if "loranew_A" in name_ and name.split("lora_A")[0] == name_.split("loranew_A")[0]:
-                        orthogonal_loss += torch.abs(torch.mm(param, param_.T)).sum() # [r * dim] * [dim * r]
-                        break # target modules have been matched
+                        # A_old: [r_sum, in_features], A_new: [r_new, in_features] (or [r_new, in_features+1] for hyperbolic)
+                        if param.numel() == 0 or param_.numel() == 0:
+                            break
+
+                        # Align hyperbolic (+1) time-like dimension if present
+                        if param_.dim() == 2 and param.dim() == 2 and param_.shape[1] == param.shape[1] + 1:
+                            param_aligned = param_[:, 1:]
+                        else:
+                            param_aligned = param_
+
+                        # Only compute when shapes are compatible
+                        if param.shape[1] == param_aligned.shape[1]:
+                            orthogonal_loss = orthogonal_loss + torch.abs(torch.mm(param, param_aligned.T)).sum()
+                        break  # target modules have been matched
 
         # l2-normalization for loranew_A/B
         l2_loss = 0.
@@ -105,22 +117,37 @@ class UIETrainer(Seq2SeqTrainer):
         lamda_1 = self.args.lamda_1
         lamda_2 = self.args.lamda_2
 
-        logger.info(f"orthogonal_loss: {orthogonal_loss.item()}; l2_loss: {l2_loss.item()}; accuracy_loss: {loss.item()}; λ1: {lamda_1}; λ2: {lamda_2}")
-        loss = loss + orthogonal_loss * lamda_1 + l2_loss * lamda_2
+        total_loss = base_loss + orthogonal_loss * lamda_1 + l2_loss * lamda_2
+
+        # Use the Trainer logging system so these show up in stdout *and* wandb/tensorboard if enabled.
+        # Only log from rank 0 to avoid duplicated lines.
+        if self.is_world_process_zero():
+            self.log({
+                "train/base_loss": float(base_loss.detach().cpu()),
+                "train/orthogonal_loss": float(orthogonal_loss.detach().cpu()),
+                "train/l2_loss": float(l2_loss.detach().cpu()),
+                "train/total_loss": float(total_loss.detach().cpu()),
+                "train/lambda_1": float(lamda_1),
+                "train/lambda_2": float(lamda_2),
+            })
+
+        total_loss = total_loss
         ######################################################################
 
         if self.do_grad_scaling:
-            self.scaler.scale(loss).backward()
+            self.scaler.scale(total_loss).backward()
         elif self.use_apex:
-            with amp.scale_loss(loss, self.optimizer) as scaled_loss:
+            with amp.scale_loss(total_loss, self.optimizer) as scaled_loss:
                 scaled_loss.backward()
         elif self.deepspeed:
             # loss gets scaled under gradient_accumulation_steps in deepspeed
-            loss = self.deepspeed.backward(loss)
+            self.deepspeed.backward(total_loss)
         else:
-            loss.backward()
+            total_loss.backward()
 
-        return loss.detach()
+        # Return the base task loss so HF Trainer's own "loss" metric stays interpretable.
+        # The regularizers are logged separately above.
+        return base_loss.detach()
 
 
     def evaluation_loop(

@@ -46,7 +46,9 @@ dist/
 logs/
 !logs/.gitkeep
 logs_and_outputs/
+!logs_and_outputs/**/.gitkeep
 logs_and_outputs_llama/
+!logs_and_outputs_llama/**/.gitkeep
 outputs/
 results/
 runs/

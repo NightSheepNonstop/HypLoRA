@@ -84,6 +84,13 @@ class LoraConfig(PeftConfig):
         default=True,
         metadata={"help": "Whether to initialize the weights of the Lora layers."},
     )
+    lora_type: str = field(
+        default="std",
+        metadata={
+            "help": "Type of LoRA adaptation for the *loranew_* branch. Supported: std, hyperbolic, hyperbolic_rot. "
+            "You can also pass curvature as suffix like 'hyperbolic-1.0'."
+        },
+    )
     r_sum: int = field(default=0) # modified. This argument represents the dim of the previous LoRA parameters. 
     save_loranew: bool = field(default=False) # modified. This arguments represents whether modules named of 'loranew_A/B' are saved independently, rather than being combined with "lora_A/B".  
 
@@ -184,6 +191,7 @@ class LoraModel(torch.nn.Module):
             "lora_dropout": lora_config.lora_dropout,
             "fan_in_fan_out": lora_config.fan_in_fan_out,
             "init_lora_weights": lora_config.init_lora_weights,
+            "lora_type": getattr(lora_config, "lora_type", "std"),
         }
         key_list = [key for key, _ in self.model.named_modules()]
         for key in key_list:
@@ -428,6 +436,8 @@ class LoraLayer:
         in_features: int,
         out_features: int,
     ):
+        # lora_type only affects the *loranew_* branch; kept here so update_layer can size modules correctly.
+        self.lora_type = "std"
         self.r = {}
         self.lora_alpha = {}
         self.scaling = {}
@@ -456,8 +466,19 @@ class LoraLayer:
         self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
         # Actual trainable parameters
         if r > 0:
-            self.loranew_A.update(nn.ModuleDict({adapter_name: nn.Linear(self.in_features, r, bias=False)})) # modified
-            self.loranew_B.update(nn.ModuleDict({adapter_name: nn.Linear(r, self.out_features, bias=False)})) # modified
+            # loranew_ branch can optionally be hyperbolic; in that case we need +1 padding dimension.
+            lora_type = getattr(self, "lora_type", "std")
+            if lora_type in ("hyperbolic", "hyperbolic_rot"):
+                self.loranew_A.update(nn.ModuleDict({adapter_name: nn.Linear(self.in_features + 1, r, bias=False)}))
+                if lora_type == "hyperbolic":
+                    self.loranew_B.update(
+                        nn.ModuleDict({adapter_name: nn.Linear(r + 1, self.out_features, bias=False)})
+                    )
+                else:
+                    self.loranew_B.update(nn.ModuleDict({adapter_name: nn.Linear(r, self.out_features, bias=False)}))
+            else:
+                self.loranew_A.update(nn.ModuleDict({adapter_name: nn.Linear(self.in_features, r, bias=False)})) # modified
+                self.loranew_B.update(nn.ModuleDict({adapter_name: nn.Linear(r, self.out_features, bias=False)})) # modified
             self.lora_A.update(nn.ModuleDict({adapter_name: nn.Linear(self.in_features, r_sum, bias=False)})) # modified
             self.lora_B.update(nn.ModuleDict({adapter_name: nn.Linear(r_sum, self.out_features, bias=False)})) # modified
             self.scaling[adapter_name] = lora_alpha / r
@@ -518,6 +539,7 @@ class Linear(nn.Linear, LoraLayer):
         lora_dropout: float = 0.0,
         fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         r_sum: int = 0, # modified
+        lora_type: str = "std",
         **kwargs,
     ):
         init_lora_weights = kwargs.pop("init_lora_weights", True)
@@ -528,6 +550,18 @@ class Linear(nn.Linear, LoraLayer):
         self.weight.requires_grad = False
 
         self.fan_in_fan_out = fan_in_fan_out
+        # Only affects the *loranew_* branch. The legacy lora_A/lora_B branch stays standard.
+        self.lora_type = (lora_type or "std").split("-")[0]
+        if len((lora_type or "std").split("-")) > 1:
+            try:
+                k = float((lora_type or "std").split("-")[1])
+            except ValueError:
+                k = 1.0
+        else:
+            k = 1.0
+        # Curvature / normalization params used by hyperbolic variants
+        self.k = nn.Parameter(torch.tensor(k), requires_grad=(self.lora_type != "std"))
+        self.norm_scale = nn.Parameter(torch.tensor(0.0), requires_grad=(self.lora_type != "std"))
         if fan_in_fan_out:
             self.weight.data = self.weight.data.T
 
@@ -536,6 +570,10 @@ class Linear(nn.Linear, LoraLayer):
         self.active_adapter = adapter_name
 
     def merge(self):
+        # For hyperbolic variants, the loranew_ update is input-dependent and cannot be merged into weights.
+        if getattr(self, "lora_type", "std") != "std":
+            warnings.warn("merge() skipped: lora_type is not 'std' (hyperbolic LoRA can't be weight-merged).")
+            return
         if self.active_adapter not in self.lora_A.keys():
             return
         if self.merged:
@@ -552,6 +590,8 @@ class Linear(nn.Linear, LoraLayer):
             self.merged = True
 
     def unmerge(self):
+        if getattr(self, "lora_type", "std") != "std":
+            return
         if self.active_adapter not in self.lora_A.keys():
             return
         if not self.merged:
@@ -566,6 +606,41 @@ class Linear(nn.Linear, LoraLayer):
                 * self.scaling[self.active_adapter]
             )
             self.merged = False
+
+    @staticmethod
+    def _lorentz_expmap0(u: torch.Tensor, k: torch.Tensor, dim: int = -1, min: float = 1e-8) -> torch.Tensor:
+        # Adapted from HypLLM hyperbolic LoRA implementation.
+        x = u.narrow(dim, 1, u.size(dim) - 1)
+        sqrtK = torch.sqrt(torch.abs(k))
+        x_norm = torch.norm(x, p=2, dim=dim, keepdim=True).clamp(min, max=math.asinh(2 ** 15))
+        theta = x_norm / sqrtK
+
+        l_v = sqrtK * torch.cosh(theta)
+        r_v = sqrtK * torch.sinh(theta) * x / x_norm
+        v = torch.cat((l_v, r_v), dim)
+        return v
+
+    @staticmethod
+    def _lorentz_logmap0(x: torch.Tensor, k: torch.Tensor, dim: int = -1, min: float = 1e-7) -> torch.Tensor:
+        d = x.size(dim) - 1
+        y = x.narrow(dim, 1, d)
+        sqrtK = torch.sqrt(torch.abs(k))
+        y_norm = torch.norm(y, p=2, dim=dim, keepdim=True).clamp(min)
+        res = torch.zeros_like(x)
+        theta = torch.clamp(x.narrow(dim, 0, 1) / sqrtK, min=1.0 + 1e-7)
+        res.narrow(dim, 1, d).copy_(sqrtK * torch.arccosh(theta) * y / y_norm)
+        return res
+
+    def _padding_zero(self, x: torch.Tensor, normalize: bool = True) -> torch.Tensor:
+        # pad a 0 in the first (time) dimension to map R^d -> R^{d+1}
+        num_dims = len(x.size())
+        padding = [0] * (2 * num_dims)
+        padding[-2 * num_dims] = 1
+        if normalize:
+            x = x / x.norm(dim=-1, keepdim=True) * self.norm_scale.exp().clamp(max=10)
+        else:
+            x = x * self.norm_scale.exp().clamp(max=10)
+        return F.pad(x, padding, "constant", value=0)
 
     def forward(self, x: torch.Tensor):
         previous_dtype = x.dtype
@@ -590,12 +665,40 @@ class Linear(nn.Linear, LoraLayer):
             )
 
             # modified
-            result += (
-                self.loranew_B[self.active_adapter](
-                    self.loranew_A[self.active_adapter](x)
+            if getattr(self, "lora_type", "std") == "std":
+                result += (
+                    self.loranew_B[self.active_adapter](
+                        self.loranew_A[self.active_adapter](x)
+                    )
+                    * self.scaling[self.active_adapter]
                 )
-                * self.scaling[self.active_adapter] 
-            )
+            elif self.lora_type in ("hyperbolic", "hyperbolic_rot"):
+                # Hyperbolic LoRA only for the loranew_ branch.
+                x_h = x.to(self.loranew_A[self.active_adapter].weight.dtype)
+                x_h = self.lora_dropout[self.active_adapter](x_h)
+                x_h = self._padding_zero(x_h)
+                x_h = self._lorentz_expmap0(x_h, self.k)
+
+                if self.lora_type == "hyperbolic":
+                    # Two-step transform on manifold with time coord reconstruction
+                    x_space = self.loranew_A[self.active_adapter](x_h)
+                    x_time = ((x_space ** 2).sum(dim=-1, keepdim=True) + self.k.abs()).sqrt()
+                    x_man = torch.cat([x_time, x_space], dim=-1)
+
+                    x_space = self.loranew_B[self.active_adapter](x_man)
+                    x_time = ((x_space ** 2).sum(dim=-1, keepdim=True) + self.k.abs()).sqrt()
+                    x_man = torch.cat([x_time, x_space], dim=-1)
+                else:
+                    # hyperbolic_rot: direct A then B in ambient space
+                    x_man = self.loranew_A[self.active_adapter](x_h)
+                    x_space = self.loranew_B[self.active_adapter](x_man)
+                    x_time = ((x_space ** 2).sum(dim=-1, keepdim=True) + self.k.abs()).sqrt()
+                    x_man = torch.cat([x_time, x_space], dim=-1)
+
+                delta = self._lorentz_logmap0(x_man, self.k)[..., 1:]
+                result += (delta * self.scaling[self.active_adapter]).to(result.dtype)
+            else:
+                raise NotImplementedError(f"Unsupported lora_type: {self.lora_type}")
             
         else:
             result = F.linear(x, transpose(self.weight, self.fan_in_fan_out), bias=self.bias)

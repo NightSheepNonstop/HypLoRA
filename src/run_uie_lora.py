@@ -53,8 +53,9 @@ from uie_trainer_lora import UIETrainer, DenserEvalCallback, skip_instructions
 from compute_metrics import compute_metrics, compute_grouped_metrics
 from model.llama import LlamaForCausalLM_with_lossmask
 
-# off wandb
-os.environ['WANDB_DISABLED'] = "True"
+# W&B (Weights & Biases) is optional. We keep it disabled by default and enable it via CLI args.
+# NOTE: If you run on an offline cluster, keep it disabled or set WANDB_MODE=offline.
+# (We set env vars after argument parsing so CLI can control it.)
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 logger = logging.getLogger(__name__)
 CURRENT_DIR = os.path.dirname(__file__)
@@ -116,6 +117,14 @@ class ModelArguments:
         default=8,
         metadata={
             "help": "Intrinsic dimension of the latent space."
+        },
+    )
+
+    lora_type: Optional[str] = field(
+        default="std",
+        metadata={
+            "help": "LoRA adaptation type for the *loranew_* branch. Supported: std, hyperbolic, hyperbolic_rot. "
+            "You can pass curvature as suffix like 'hyperbolic-1.0'."
         },
     )
 
@@ -240,6 +249,19 @@ class UIETrainingArguments(Seq2SeqTrainingArguments):
     lamda_1: float = field(default = 0.5)
     lamda_2: float = field(default = 0)
 
+    enable_wandb: bool = field(
+        default=False,
+        metadata={"help": "Enable Weights & Biases logging (report_to=wandb). Default: False."},
+    )
+    wandb_project: Optional[str] = field(
+        default="O-LoRA",
+        metadata={"help": "wandb project name (only used when --enable_wandb)."},
+    )
+    wandb_run_name: Optional[str] = field(
+        default=None,
+        metadata={"help": "wandb run name override (only used when --enable_wandb)."},
+    )
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -253,6 +275,22 @@ def main():
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+
+    # Configure W&B based on CLI.
+    # - If disabled: prevent any wandb init.
+    # - If enabled : make sure HF Trainer reports to wandb.
+    if getattr(training_args, "enable_wandb", False):
+        os.environ["WANDB_DISABLED"] = "False"
+        os.environ.setdefault("WANDB_PROJECT", str(training_args.wandb_project))
+
+        # Let HF Trainer send logs to wandb.
+        training_args.report_to = ["wandb"]
+
+        # Prefer explicit wandb_run_name; otherwise reuse training_args.run_name if set.
+        if training_args.wandb_run_name:
+            training_args.run_name = training_args.wandb_run_name
+    else:
+        os.environ["WANDB_DISABLED"] = "True"
 
     # Setup logging
     logging.basicConfig(
@@ -378,7 +416,12 @@ def main():
             use_auth_token=True if model_args.use_auth_token else None
         )
         peft_config = LoraConfig(
-            task_type=TaskType.CAUSAL_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
+            task_type=TaskType.CAUSAL_LM,
+            inference_mode=False,
+            r=model_args.lora_dim,
+            lora_alpha=32,
+            lora_dropout=0.1,
+            lora_type=model_args.lora_type,
         )
         model = get_peft_model(model, peft_config)
     else:
@@ -391,7 +434,12 @@ def main():
             use_auth_token=True if model_args.use_auth_token else None,
         )
         peft_config = LoraConfig(
-            task_type=TaskType.SEQ_2_SEQ_LM, inference_mode=False, r=model_args.lora_dim, lora_alpha=32, lora_dropout=0.1
+            task_type=TaskType.SEQ_2_SEQ_LM,
+            inference_mode=False,
+            r=model_args.lora_dim,
+            lora_alpha=32,
+            lora_dropout=0.1,
+            lora_type=model_args.lora_type,
         )
         model = get_peft_model(model, peft_config)
 

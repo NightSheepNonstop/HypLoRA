@@ -4,8 +4,8 @@
 #SBATCH -c 4                             # --cpus-per-task
 #SBATCH --gres=gpu:a100-sxm4:2
 
-#SBATCH -e /home/yangye/O-LoRA/logs_and_outputs/order_1/logs/train_and_infer1.err
-#SBATCH -o /home/yangye/O-LoRA/logs_and_outputs/order_1/logs/train_and_infer1.log
+#SBATCH -e /home/yangye/O-LoRA/logs_and_outputs/order_1/logs/train_and_infer2.err
+#SBATCH -o /home/yangye/O-LoRA/logs_and_outputs/order_1/logs/train_and_infer2.log
 
 
 cd "$HOME/O-LoRA" 
@@ -41,6 +41,7 @@ deepspeed --num_gpus=2 --master_port $port src/run_uie_lora.py \
    --do_train \
    --do_predict \
    --predict_with_generate \
+   --lora_type hyperbolic-1.0 \
    --model_name_or_path /workspace/data/MLLMs/$USER/initial_model/t5-large \
    --data_dir CL_Benchmark \
    --task_config_dir configs/order1_configs/dbpedia \
@@ -77,6 +78,7 @@ sleep 5
    --do_train \
    --do_predict \
    --predict_with_generate \
+    --lora_type hyperbolic-1.0 \
    --model_name_or_path logs_and_outputs/order_1/outputs/1-dbpedia/adapter \
    --data_dir CL_Benchmark \
    --task_config_dir configs/order1_configs/amazon \
@@ -113,6 +115,7 @@ sleep 5
    --do_train \
    --do_predict \
    --predict_with_generate \
+    --lora_type hyperbolic-1.0 \
    --model_name_or_path logs_and_outputs/order_1/outputs/2-amazon/adapter \
    --data_dir CL_Benchmark \
    --task_config_dir configs/order1_configs/yahoo \
@@ -149,6 +152,7 @@ sleep 5
    --do_train \
    --do_predict \
    --predict_with_generate \
+    --lora_type hyperbolic-1.0 \
    --model_name_or_path logs_and_outputs/order_1/outputs/3-yahoo/adapter \
    --data_dir CL_Benchmark \
    --task_config_dir configs/order1_configs/agnews \
